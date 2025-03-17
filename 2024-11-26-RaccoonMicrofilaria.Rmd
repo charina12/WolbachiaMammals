@@ -1,0 +1,178 @@
+---
+title: "Raccoon MF length"
+author: "Charlotte O. Moore"
+date: "2024-11-26"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE)
+```
+
+
+```{r}
+library(here)
+library(readxl)
+library(tidyr)
+library(dplyr)
+library(ggplot2)
+library(crosstable)
+library(cowplot)
+library(ggsci)
+
+theme_char <- function(base_size = 11, base_family = ""){
+  theme_bw() %+replace%
+    theme(axis.text = element_text(color = "Black"),
+          panel.grid.minor = element_blank(),
+          panel.grid.major = element_blank(),
+          axis.line = element_line(),
+          panel.border = element_blank())
+}
+theme_set(theme_char())
+
+df <- read.csv(here("Wolbachia", "RaccoonKnottsSummary11-2024.csv"))
+df <- df %>% filter(Date != "2024-11-11")
+```
+
+### Microfilaria by two techniques on three raccoons
+
+```{r, fig.width = 4, fig.height = 6}
+length <- df %>% mutate(Slide = case_when(
+  Slide == "Knotts" ~ "MKT",
+  Slide == "Wright-Giemsa" ~ "Blood Smear"
+)) %>% 
+  ggplot(aes(x = Slide, y = Length, color = Host))+
+  #geom_rect(data = x, inherit.aes = FALSE, aes(ymin = 285, ymax = 295, xmin = 0, xmax = Inf),
+           # color = "transparent", fill = "orange", alpha = 0.1)+
+  #annotate("rect", xmin=0, xmax=Inf, ymin=285, ymax=295, alpha=0.3, fill="orange")+
+  #annotate("rect", xmin=0, xmax=Inf, ymin=120, ymax=149, alpha=0.3, fill="red")+
+  #geom_text(inherit.aes = FALSE, aes(y = 290, x = "Blood Smear", label = "M. llewellyni"), 
+  #          color = "orange")+
+  #geom_text(inherit.aes = FALSE, aes(y = 134.5, x = "Blood Smear", label = "M. procyonis"), 
+  #          color = "red")+
+  geom_boxplot()+
+  geom_point(alpha = 0.7, position = position_jitterdodge())+
+  scale_y_continuous(limits = c(0, 350),
+                     expand = c(0, 0))+
+  labs(y = "Microfilaria Length (microns)", x = "Technique")
+print(length)
+ggsave(plot = length, here("Wolbachia", "Image", "Length.png"), width = 5, height = 5)
+```
+
+### Table of length by two techniques
+```{r}
+df %>% crosstable(Length, by = "Slide", test = TRUE, 
+                  funs = c(meanCI, N)) %>% as_flextable()
+df %>% crosstable(Length, by = "Slide")
+```
+
+### Average diameter versus maximum diameter
+```{r, fig.width = 6, fig.height = 6}
+df %>% group_by(Host, Slide) %>% 
+  pivot_longer(cols = c(MaxDiameter, AverageDiameter), names_to = "Measurement") %>% 
+  select(Host, Slide, Measurement, value) %>% 
+  mutate(Measurement = case_when(Measurement == "AverageDiameter" ~ "Average Diameter",
+                              Measurement == "MaxDiameter" ~ "Max Diameter")) %>% 
+  ggplot(aes(x = Slide, y = value, color = Host))+
+  #geom_hline(yintercept = 2.5, linetype = "dashed", color = "orange")+
+  #annotate("rect", xmin=0, xmax=Inf, ymin= 3.6, ymax= 4.9, alpha=0.3, fill="red")+
+  #geom_text(inherit.aes = FALSE, aes(y = 2.5, x = "Knotts", label = "M. llewellyni"), 
+   #         color = "orange")+
+  #geom_text(inherit.aes = FALSE, aes(y = 4.25, x = "Knotts", label = "M. procyonis"), 
+  #          color = "red")+
+    geom_boxplot()+
+  geom_point(alpha = 0.7, position = position_jitterdodge())+
+  facet_grid(.~Measurement)+
+  scale_y_continuous(limits = c(0, 6),
+                     expand = c(0, 0))+
+  labs(y = "Microfilaria Diameter (microns)", x = "Technique")
+ggsave(plot = last_plot(), here("Wolbachia", "Image", "Diameter.png"), width = 5, height = 5)
+```
+
+### Maximum diameter
+```{r, fig.width = 6, fig.height = 6}
+diameter <- df %>% mutate(group = "Max Diameter") %>% 
+  mutate(Slide = case_when(
+  Slide == "Knotts" ~ "MKT",
+  Slide == "Wright-Giemsa" ~ "Blood Smear")) %>% 
+  ggplot(aes(x = Slide, y = MaxDiameter, color = Host))+
+  #geom_hline(yintercept = 2.5, linetype = "dashed", color = "orange")+
+  #annotate("rect", xmin=0, xmax=Inf, ymin= 3.6, ymax= 4.9, alpha=0.3, fill="red")+
+  #geom_text(inherit.aes = FALSE, aes(y = 2.5, x = "Modified Knott's", label = "M. llewellyni"), 
+  #          color = "orange")+
+  #geom_text(inherit.aes = FALSE, aes(y = 4.25, x = "Modified Knott's", label = "M. procyonis"), 
+   #         color = "red")+
+    geom_boxplot()+
+  geom_point(alpha = 0.7, position = position_jitterdodge())+
+  scale_y_continuous(limits = c(0, 6),
+                     expand = c(0, 0))+
+  labs(y = "Maximum Diameter (microns)", x = "Technique")
+print(diameter)
+ggsave(plot = diameter, here("Wolbachia", "Image", "MaxDiameter.png"), width = 5, height = 5)
+```
+
+### Table of maximum diameter by two techniques
+```{r}
+df %>% crosstable(MaxDiameter, by = "Slide", test = TRUE,
+                  funs = c(meanCI, N)) %>% as_flextable()
+
+df %>% crosstable(MaxDiameter, by = "Slide")
+```
+### Location of three features as a % of body length
+
+```{r, fig.width = 6, fig.height = 6}
+x <- df %>% group_by(Host, Slide) %>% 
+  pivot_longer(cols = c(Head, Nervering, Excretorypore), names_to = "Location") %>% 
+  select(Host, Slide, Location, value) %>% 
+  mutate(Location = case_when(Location == "Excretorypore" ~ "Excretory pore",
+                              Location == "Nervering" ~ "Nerve ring",
+                              Location == "Head" ~ "Head"))
+
+location <- x %>% filter(Slide == "Knotts") %>% 
+  ggplot(aes(x = Host, y = value, color = Location))+
+  #geom_hline(yintercept = 17.9, linetype = "dashed", color = "orange")+
+  #geom_hline(yintercept = 25, linetype = "dashed", color = "orange")+
+  #geom_text(inherit.aes = FALSE, aes(y = 20, x = "M. llewellyni", label = "Nerve ring"), 
+   #         color = "orange")+
+   #geom_text(inherit.aes = FALSE, aes(y = 27, x = "M. llewellyni", label = "Excretory pore"), 
+    #        color = "orange")+
+  #geom_hline(yintercept = 25, linetype = "dashed", color = "red")+
+  #geom_hline(yintercept = 39.7, linetype = "dashed", color = "red")+
+  #geom_text(inherit.aes = FALSE, aes(y = 27, x = "M. procyonis", label = "Nerve ring"), 
+   #         color = "red")+
+   #geom_text(inherit.aes = FALSE, aes(y = 42, x = "M. procyonis", label = "Excretory pore"), 
+    #        color = "red")+
+  geom_boxplot()+
+  scale_color_npg()+
+  geom_jitter(alpha = 0.7, height = 0, width = 0.2)+
+  scale_y_continuous(expand = c(0.01,0),
+                     limits = c(0, 100))+
+  labs(y = "% Body Length")
+print(location)
+ggsave(plot = location, here("Wolbachia", "Image", "Location.png"), width = 6, height = 6)
+```
+
+### Location of three features as a % of body length
+
+```{r}
+crosstable(df, Head) %>% as_flextable()
+crosstable(df, Nervering) %>% as_flextable()
+crosstable(df, Excretorypore) %>% as_flextable()
+```
+
+### Figure for publication
+
+```{r, fig.width = 9, fig.height = 4}
+plot_grid(length, diameter, location, 
+          rel_width = c(1, 1, 1), 
+          ncol = 3, nrow = 1,
+          labels = c("B", "", "C"))
+ggsave(plot = last_plot(), 
+       here("Wolbachia", "Image", "Figure.png"), width = 12, height = 7)
+```
+
+
+```{r}
+sessionInfo()
+```
+
