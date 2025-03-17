@@ -1,0 +1,349 @@
+---
+title: "2023-10-26-Wolbachia"
+author: "Charlotte Manvell"
+date: "2023-10-26"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+```{r, output = FALSE, error = FALSE, message=FALSE, warning = FALSE}
+library(here)
+library(ggplot2)
+library(tidyverse)
+library(dplyr)
+library(ggsci)
+library(cowplot)
+library(readxl)
+library(ggrepel)
+library(janitor)
+library(scatterpie)
+library(forcats)
+library(usmap)
+library(tidycensus)
+library(crosstable)
+library(networkD3)
+library(lubridate)
+library(epiR)
+npg <- pal_jama()(10)
+theme_char <- function(base_size = 11, base_family = ""){
+  theme_bw() %+replace%
+    theme(axis.text = element_text(color = "Black"),
+          panel.grid.minor = element_blank(),
+          panel.grid.major = element_blank(),
+          axis.line = element_line(),
+          panel.border = element_blank())
+}
+theme_set(theme_char())
+renameneg <- function(rowname){
+  rowname <- replace_na(rowname, "Negative")}
+path <- "/Users/charlottemanvell"
+```
+
+
+```{r pressure, echo=FALSE}
+df <- read_excel(here("Wolbachia", "Dataframe.xlsx")) 
+  df$Age <- as.numeric(df$Age)
+  df <- df %>% mutate(Wolb = case_when(WolbType == "wCfeF" | WolbType == "W. pipientis" | WolbType == "G. rotundatum" | WolbType == "Unknown" ~ "Insect", 
+                                     WolbType == "D. immitis" ~ "D. immitis",
+                                     WolbType == "M. ozzardi" ~ "Mansonella",
+                                     WolbType == "D. repens" ~ "D. repens")) %>% 
+    mutate(HostSpecies = case_when(Species == "CANINE" ~ "Dog",
+                                   Species == "SA EXOTIC" ~ "Raccoon"))
+  df$Wolbachia <- 1
+dog <- df %>% filter(Species == "CANINE")
+dog.dna <- dog %>% filter(Found != 0)
+
+vbddl2021raw <- read.csv(here("Wolbachia", "deposit2021.csv"), fill = TRUE)
+
+vbddl2017raw <- read.csv(here("Wolbachia", "deposit2017.csv"), fill = TRUE)
+
+#uvisdata <- read.csv(here("Wolbachia", "UVISdatadeposit.csv"))
+#uvisdata <- uvisdata %>% select(SAMPLE.ID, STATE)
+#colnames(uvisdata) <- c("Accession", "State")
+
+#vbddl2017raw <- left_join(vbddl2017raw1, uvisdata, by = "Accession")
+
+vbddl2017pcr <- vbddl2017raw %>% #select PCR data from 2017-2021
+  filter(Test_Name %in% c("Anaplasma Genus PCR", "Ehrlichia Genus PCR")) %>% 
+  spread(key = Test_Name, value = Result)%>% 
+      filter(grepl("PCR", Test))%>% 
+  group_by(Accession) %>% 
+  mutate(Year = str_sub(Received_Date, 0, 4)) %>% 
+  filter(Species != "ARTHOPOD") %>% 
+  filter(Year < 2024) %>% 
+  mutate(Wolbachia = ifelse(Accession %in% df$ID, 1, 0)) %>% 
+  mutate(State = replace_na(State, "Unknown"))
+
+vbddl2017pcr$State <- ifelse(vbddl2017pcr$State == "", "Unknown", vbddl2017pcr$State)
+
+vbddl2017pcr$Received_Date <- as.Date(vbddl2017pcr$Received_Date, format = "%Y-%m-%d")
+
+vbddl2017snap <- vbddl2017raw %>% #select and reformat 2017-2021 SNAP data
+  spread(key = Test_Name, value = Result)%>% 
+      filter(grepl("SNAP", Test))%>% 
+  mutate(Year = str_sub(Received_Date, 0, 4)) %>% 
+  filter(Species != "ARTHOPOD") %>% 
+  filter(Year < 2024) %>% 
+  mutate(`Heartworm SNAP4Dx Plus` = case_when(
+    `Heartworm SNAP4Dx Plus` == "INSUFFICIENT SAMPLE" ~ NA_character_,
+    `Heartworm SNAP4Dx Plus` == "Negative" ~ "NEGATIVE",
+    `Heartworm SNAP4Dx Plus` == "WEAKLY POSITIVE" ~ "POSITIVE",
+     TRUE ~ `Heartworm SNAP4Dx Plus`))
+
+vbddl2017snap$Received_Date <- as.Date(vbddl2017snap$Received_Date, 
+                                       format = "%Y-%m-%d")
+
+vbddl2021pcr <- vbddl2021raw %>% #select PCR data from 2021-2024 data
+  #select(-X) %>% 
+  filter(Test %in% c("Anaplasma Genus PCR", "Ehrlichia Genus PCR")) %>% 
+  group_by(Accession) %>% 
+  spread(key = Test, value = Result) %>% 
+  mutate(Year = str_sub(Received_Date, 0, 4)) %>% 
+  filter(Species != "ARTHOPOD") %>% 
+  filter(Year < 2024) %>% 
+  mutate(Wolbachia = ifelse(Accession %in% df$ID, 1, 0)) %>% 
+  mutate(State = replace_na(State, "Unknown"))
+vbddl2021pcr$State <- ifelse(vbddl2021pcr$State == "", "Unknown", vbddl2021pcr$State)
+
+vbddl2021pcr$Received_Date <- as.Date(vbddl2021pcr$Received_Date, 
+                                      format = "%Y-%m-%d")
+
+vbddl2021snap <- vbddl2021raw %>% #select SNAP data
+  group_by(Accession) %>% 
+  spread(key = Test, value = Result) %>% 
+      filter(grepl("SNAP", Order)) %>% 
+  mutate(Accession = paste0(substr(Accession, 1, 5), str_pad((as.numeric(substr(Accession, 6, 11))-1), 6, pad = "0")))
+
+
+vbddl2021snap <- vbddl2021snap %>% #reformat SNAP data to column
+  mutate(Year = str_sub(Received_Date, 0, 4)) %>% 
+  filter(Species != "ARTHOPOD") %>% 
+  filter(Year < 2024) %>% 
+  mutate(`Heartworm SNAP4Dx Plus` = case_when(
+    `Heartworm SNAP4Dx Plus` == "INSUFFICIENT SAMPLE" ~ NA_character_,
+    `Heartworm SNAP4Dx Plus` == "Negative" ~ "NEGATIVE",
+    `Heartworm SNAP4Dx Plus` == "WEAKLY POSITIVE" ~ "POSITIVE",
+     TRUE ~ `Heartworm SNAP4Dx Plus`))
+
+vbddl2021snap$Received_Date <- as.Date(vbddl2021snap$Received_Date, format = "%Y-%m-%d") #format date
+
+#select data for joint SNAP and PCR dataframe
+snap2017join <- vbddl2017snap %>% select(Accession, `Heartworm SNAP4Dx Plus`)
+
+pcr2017join <- vbddl2017pcr %>% select(Accession, Received_Date, Species, State, Breed, Sex, Year,`Anaplasma Genus PCR`, `Ehrlichia Genus PCR`)
+
+snap2021join <- vbddl2021snap %>% 
+  select(Received_Date, Species, Breed, Age, Sex, `Heartworm SNAP4Dx Plus`)%>% 
+  mutate(Accession = as.numeric(0))
+
+pcr2021join <- vbddl2021pcr %>% 
+  select(Received_Date, Species, State, Breed, Age, Sex, Year, `Anaplasma Genus PCR`, `Ehrlichia Genus PCR`) 
+
+wolbjoin <- df %>% select(ID, Wolb) %>% dplyr::rename(Accession = ID)
+
+vbddl2017 <- full_join(pcr2017join, snap2017join, by = c("Accession"))
+
+vbddl2021 <- full_join(pcr2021join, snap2021join, 
+                       by = c("Received_Date", "Species", "Breed", "Age", "Sex")) %>% 
+    mutate(Accession = Accession.x) %>% 
+  select(-c(Accession.x, Accession.y))
+  
+vbddl2021 <- vbddl2021 %>% distinct(Accession, .keep_all = T)
+  
+vbddl <- bind_rows(vbddl2021, vbddl2017) %>% 
+  mutate(Species = case_when(Species == "Avian" ~ "Avian",
+                            Species == "EQUINE" | 
+                              Species == "Equine" ~ "Equine",
+                             Species == "FELINE LA"| 
+                              Species == "Feline - Large Animal" ~ 
+                              "Feline - Large Animal",
+                             Species == "PRIMATE" | 
+                              Species == "Lemur" | 
+                              Species == "New World Monkey"~ 
+                              "Primate",
+                             Species == "CANINE"| 
+                              Species == "Canine"  ~ "Canine",
+                             Species == "CAPRINE" | 
+                              Species == "Caprine" ~ "Caprine",
+                             Species == "BOVINE"| 
+                              Species == "Bovine"  ~ "Bovine",
+                             Species == "PORCINE" | 
+                              Species == "Porcine" ~ "Porcine",
+                             Species == "SA EXOTIC" | 
+                              Species == "Exotic - Small Animal" ~ 
+                              "Exotic - Small Animal",
+                             Species == "LA EXOTIC"| 
+                              Species == "Exotic - Large Animal" ~ 
+                              "Exotic - Large Animal",
+                            Species == "Feline - Small Animal" | 
+                              Species == "FELINE" ~ "Feline - Small Animal",
+                           TRUE ~ as.character(Species))) 
+vbddl <- full_join(vbddl, wolbjoin, by = "Accession") %>% 
+    filter(!is.na(`Anaplasma Genus PCR`)) 
+
+vbddl$Wolbachia <- ifelse(!is.na(vbddl$Wolb), 1, 0)
+
+vbddldog <- vbddl %>% filter(Species == "Canine")
+
+vbddldogpcr <- vbddldog %>% filter(!is.na(`Anaplasma Genus PCR`)) 
+vbddlpcr <- vbddl %>% filter(!is.na(`Anaplasma Genus PCR`)) 
+
+#remove extra dataframes
+#rm(vbddl2017raw, vbddl2021raw, pcrjoin, snapjoin, wolbjoin, vbddl2017snap, vbddl2017pcr, vbddl2021snap, vbddl2021pcr, pcr2017join, pcr2021join, snap2021join, snap2017join)
+```
+
+```{r}
+paste0("Tested ", nrow(vbddl), " samples from  ", length(unique(vbddl$Species)))
+
+host <- tabyl(vbddl, Species, sort = TRUE) %>% 
+  arrange(desc(n))
+host
+write.csv(host, here("Wolbachia", "host.csv"), row.names = F)
+```
+
+```{r, fig.height = 6, fig.width = 4}
+vbddlpcr %>% 
+  ggplot(aes(x = fct_rev(forcats::fct_infreq(State))))+
+  geom_bar(color = "black", width = 0.7)+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        axis.text.y = element_text(size = 7))+
+  scale_y_continuous(expand = c(0,0), limits = c(0, 5250))+
+  geom_text(aes(label = after_stat(count)), stat = 'count', hjust = -0.25, size = 2.5)+
+  coord_flip()
+tabyl(vbddlpcr, State, sort = TRUE) %>% 
+  arrange(desc(n))
+```
+
+What state are raccoons from?
+```{r}
+vbddlpcr %>% filter(Species == "Raccoon") %>% 
+  crosstable(State)
+```
+
+
+```{r}
+x <- tabyl(vbddldogpcr, State)
+x <- x %>% dplyr::rename(Total = n) %>% select(-percent)
+
+y <- as.data.frame(tabyl(df, State))
+y <- y %>% dplyr::rename(Positive = n) %>% select(-percent)
+
+stateperc <- full_join(x, y, by = "State") %>% 
+  mutate(Positive = replace_na(Positive, 0)) %>% 
+  mutate(perc = (Positive/Total)*100)
+stateperc %>% filter(perc != 0) %>% 
+  ggplot(aes(x = fct_rev(fct_reorder(State, perc)), y = perc))+
+  geom_col(fill = npg[8], color = "black")+
+  scale_y_continuous(breaks = seq(0, 3.5, by = 0.50), expand = c(0,0), limits = c(0, 3.5))+
+  #geom_text(aes(label = Positive), vjust = -0.5)+
+  labs(x = "State or Territory", y = "Number of Dogs")
+write.csv(stateperc, here("Wolbachia", "DogState.csv"))
+```
+
+HWSNAP compared to Wolbachia origin
+
+```{r}
+dog %>% crosstable(Wolb, by = "HWSNAP",
+                   percent_pattern = "{n} ({p_row})", percent_digits = 1,
+                   total = "column") %>% as_flextable()
+```
+
+Dogs with D. immitis-Wolbachia detected compared to Heartworm SNAP 4Dx
+
+```{r}
+vbddldog %>% filter(!is.na(`Heartworm SNAP4Dx Plus`)) %>% 
+  mutate(heartwormwolb = ifelse(Wolb == "D. immitis", 1, 0)) %>% 
+  mutate(heartwormwolb = ifelse(is.na(heartwormwolb), 0, heartwormwolb)) %>% 
+  crosstable(`Heartworm SNAP4Dx Plus`, by = "heartwormwolb", test = TRUE,
+             percent_pattern = "{n} ({p_row})", percent_digits = 2,
+                   total = "column") %>% as_flextable()
+```
+
+Gold standard - antigen test
+```{r}
+TP <- nrow(filter(vbddldog, Wolb == "D. immitis" & 
+                    `Heartworm SNAP4Dx Plus` == "POSITIVE"))
+TN <- nrow(filter(vbddldog, Wolb %in% c("Insect", NA, "D. repens") & 
+                    `Heartworm SNAP4Dx Plus` == "NEGATIVE"))
+FP <- nrow(filter(vbddldog, Wolb == "D. immitis" & 
+                    `Heartworm SNAP4Dx Plus` == "NEGATIVE"))
+FN <- nrow(filter(vbddldog, Wolb %in% c("Insect", NA, "D. repens") & 
+                    `Heartworm SNAP4Dx Plus` == "POSITIVE"))
+
+data <- as.table(matrix(c(TP, FP, FN, TN), nrow = 2, byrow = TRUE))
+rval <- epi.tests(data, conf.level = 0.95)
+
+print(rval)
+                 
+paste0("Accuracy: ", round(((TP + TN)/(TP + TN + FP + FN))*100, 2))
+```
+
+Gold standard - filarial PCR
+```{r}
+x <- df %>% filter(Found == "1")
+
+TP <- nrow(filter(x, Wolb == "D. immitis" & 
+                    Filaria == "D. immitis"))
+TN <- nrow(filter(x, Wolb != "D. immitis" & 
+                    Filaria != "D. immitis"))
+FP <- nrow(filter(x, Wolb == "D. immitis" & 
+                    Filaria != "D. immitis"))
+FN <- nrow(filter(x, Wolb != "D. immitis" & 
+                    Filaria == "D. immitis"))
+
+paste0("Accuracy: ", round(((TP + TN)/(TP + TN + FP + FN))*100, 2))
+
+data <- as.table(matrix(c(TP, FP, FN, TN), nrow = 2, byrow = TRUE))
+rval <- epi.tests(data, conf.level = 0.95)
+
+print(rval)
+```
+
+
+
+Wolbachia identity in dogs
+```{r}
+df %>% crosstable(WolbType) %>% as_flextable()
+```
+
+Filarial detection in Wolbachia positive dogs
+
+```{r}
+df %>% crosstable("Wolb", by = Filaria) %>% as_flextable()
+```
+
+```{r}
+df %>% 
+  ggplot(aes(x = Wolb, fill = HostSpecies))+
+  geom_bar(color = "black", width = 0.6)+
+  geom_text(aes(label = after_stat(count)), stat = "count", vjust = -0.75)+
+  scale_fill_jama()+
+  scale_y_continuous(expand = c(0,0), limits = c(0, 55))+
+  labs(y = "Number of animals", fill = "Host Species", x = "Wolbachia host")#+
+  #theme(legend.position = "none")
+ggsave(here("Wolbachia", "Host.png"), width = 5, height = 4.4)
+```
+
+```{r}
+df %>% #mutate(Filaria = fct_relevel(Filaria, levels = c("Not available", "Negative", "D. immitis", "D. repens", "M. ozzardi/M. perstans"))) %>% 
+  ggplot(aes(x = Wolb, fill = Filaria))+
+  geom_bar(color = "black", width = 0.6)+
+  geom_text(aes(label = ..count..), stat = "count", position = position_stack(vjust = 0.5))+
+  scale_fill_manual(values = c(npg[3:5], "#FF9999", "white"))+
+  scale_y_continuous(expand = c(0,0), limits = c(0, 55))+
+  labs(y = "Number of animals", fill = "Filaria (28S) Species", x = "Wolbachia association")#+
+  #theme(legend.position = "none")
+ggsave(here("Wolbachia", "qPCR.png"), width = 5, height = 4.4)
+```
+
+
+```{r}
+sessionInfo()
+```
+
+
